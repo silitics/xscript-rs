@@ -142,6 +142,9 @@ read_bytes!(env, ["gzip", "--best"].with_stdin("Compress this string!"))?;
 # Result::<(), Box<dyn std::error::Error>>::Ok(())
 ```
 
+If the environment is omitted, then [`ParentEnv`] is used.
+This allows running commands in the environment of the parent process, e.g., in cases where the environment does not matter or inheriting the environment is intended.
+
 ## Optional Features
 
 This crate offers the following optional features:

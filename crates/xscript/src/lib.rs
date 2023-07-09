@@ -646,6 +646,9 @@ macro_rules! run {
     ($env:expr, [$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
         $env.run(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
     };
+    ([$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
+        $crate::ParentEnv.run(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
+    };
 }
 
 /// Runs a command in a given environment reading `stdout` as a string (see
@@ -655,6 +658,9 @@ macro_rules! read_str {
     ($env:expr, [$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
         $env.read_str(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
     };
+    ([$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
+        $crate::ParentEnv.read_str(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
+    };
 }
 
 /// Runs a command in a given environment reading `stdout` as bytes (see
@@ -663,6 +669,9 @@ macro_rules! read_str {
 macro_rules! read_bytes {
     ($env:expr, [$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
         $env.read_bytes(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
+    };
+    ([$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
+        $crate::ParentEnv.read_bytes(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
     };
 }
 
@@ -699,6 +708,17 @@ impl EnvInner {
             replay_stderr: true,
             echo_commands: false,
         }
+    }
+}
+
+/// Execution environment of the parent process.
+pub struct ParentEnv;
+
+impl Run for ParentEnv {
+    fn run(&self, cmd: &Cmd) -> Result<RunOutput, RunError> {
+        // TODO: This is inefficient, we should factor out the actual launch code.
+        let env = RunError::catch(cmd, || LocalEnv::current_dir().map_err(RunErrorKind::from))?;
+        Run::run(&env, cmd)
     }
 }
 

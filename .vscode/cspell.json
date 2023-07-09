@@ -1,0 +1,18 @@
+{
+    "version": "0.2",
+    "words": [
+        "camino",
+        "canonicalize",
+        "docsrs",
+        "podman",
+        "RUSTDOCFLAGS",
+        "RUSTFLAGS",
+        "rustfmt",
+        "silitics",
+        "Silitics",
+        "tokio",
+        "xscript",
+        "xshell",
+        "xtask"
+    ]
+}

@@ -11,7 +11,7 @@
 </p>
 
 ```rust
-use xscript::{read_str, run, vars, EnvRun, LocalEnv};
+use xscript::{read_str, run, vars, Run, LocalEnv};
 
 let mut env = LocalEnv::current_dir()?.with_vars(vars! {
     RUSTDOCFLAGS = "--cfg docsrs --cfg xscript_unstable",
@@ -30,7 +30,7 @@ Checkout the [documentation](https://docs.rs/xscript/latest/xscript/) for detail
 
 ## ⚖️ Licensing
 
-This project is licensed under either [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE) at your opinion. Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project by you, as defined in the Apache 2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+This project is licensed under either [MIT](https://github.com/silitics/xscript-rs/blob/main/LICENSE-MIT) or [Apache 2.0](https://github.com/silitics/xscript-rs/blob/main/LICENSE-APACHE) at your opinion. Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project by you, as defined in the Apache 2.0 license, shall be dual licensed as above, without any additional terms or conditions.
 
 ---
 

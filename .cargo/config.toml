@@ -1,0 +1,6 @@
+[alias]
+xtask = "run --quiet --package xtask --"
+
+[build]
+rustflags = ["--cfg", "xscript_unstable"]  # Enable unstable features.
+rustdocflags = ["--cfg", "xscript_unstable"]  # Enable unstable features.

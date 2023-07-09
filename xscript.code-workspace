@@ -1,0 +1,6 @@
+{
+  "folders": [{ "name": "XScript", "path": "." }],
+  "settings": {
+    "rust-analyzer.rustfmt.extraArgs": ["+nightly"]
+  }
+}

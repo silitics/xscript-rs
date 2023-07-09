@@ -5,4 +5,4 @@ resolver = "2"
 [workspace.package]
 authors = ["Silitics GmbH <info@silitics.com>"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/silitics/si-rust-libs/"
+repository = "https://github.com/silitics/xscript-rs/"

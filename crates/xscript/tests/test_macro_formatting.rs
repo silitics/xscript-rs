@@ -3,7 +3,7 @@ use xscript::{run, Cmd, Run, RunError, RunOutput};
 pub struct FakeEnv;
 
 impl Run for FakeEnv {
-    fn run(&self, _: &Cmd) -> Result<RunOutput, RunError> {
+    fn run(&self, _: Cmd) -> Result<RunOutput, RunError> {
         Ok(RunOutput::new()
             .with_code(0)
             .with_stdout("".into())

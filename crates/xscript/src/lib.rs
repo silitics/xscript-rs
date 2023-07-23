@@ -644,10 +644,10 @@ impl From<String> for RunErrorKind {
 #[macro_export]
 macro_rules! run {
     ($env:expr, [$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
-        $env.run(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
+        $env.run($crate::cmd!($($cmd_args)*)$($cmd_methods)*)
     };
     ([$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
-        $crate::ParentEnv.run(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
+        $crate::ParentEnv.run($crate::cmd!($($cmd_args)*)$($cmd_methods)*)
     };
 }
 
@@ -656,10 +656,10 @@ macro_rules! run {
 #[macro_export]
 macro_rules! read_str {
     ($env:expr, [$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
-        $env.read_str(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
+        $env.read_str($crate::cmd!($($cmd_args)*)$($cmd_methods)*)
     };
     ([$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
-        $crate::ParentEnv.read_str(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
+        $crate::ParentEnv.read_str($crate::cmd!($($cmd_args)*)$($cmd_methods)*)
     };
 }
 
@@ -668,10 +668,10 @@ macro_rules! read_str {
 #[macro_export]
 macro_rules! read_bytes {
     ($env:expr, [$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
-        $env.read_bytes(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
+        $env.read_bytes($crate::cmd!($($cmd_args)*)$($cmd_methods)*)
     };
     ([$($cmd_args:tt)*] $($cmd_methods:tt)*) => {
-        $crate::ParentEnv.read_bytes(&$crate::cmd!($($cmd_args)*)$($cmd_methods)*)
+        $crate::ParentEnv.read_bytes($crate::cmd!($($cmd_args)*)$($cmd_methods)*)
     };
 }
 
@@ -715,9 +715,9 @@ impl EnvInner {
 pub struct ParentEnv;
 
 impl Run for ParentEnv {
-    fn run(&self, cmd: &Cmd) -> Result<RunOutput, RunError> {
+    fn run(&self, cmd: Cmd) -> Result<RunOutput, RunError> {
         // TODO: This is inefficient, we should factor out the actual launch code.
-        let env = RunError::catch(cmd, || LocalEnv::current_dir().map_err(RunErrorKind::from))?;
+        let env = RunError::catch(&cmd, || LocalEnv::current_dir().map_err(RunErrorKind::from))?;
         Run::run(&env, cmd)
     }
 }
@@ -901,26 +901,28 @@ fn update_vars(command: &mut Command, vars: &Vars) {
 /// Trait for running commands in an execution environment.
 pub trait Run {
     /// Runs a command returning its output.
-    fn run(&self, cmd: &Cmd) -> Result<RunOutput, RunError>;
+    fn run(&self, cmd: Cmd) -> Result<RunOutput, RunError>;
 
     /// Runs a command returning its `stdout` output as a string.
-    fn read_str(&self, cmd: &Cmd) -> Result<String, RunError> {
-        let cmd = cmd.as_ref().clone().with_stdout(Out::Capture);
-        self.run(&cmd)
+    fn read_str(&self, cmd: Cmd) -> Result<String, RunError> {
+        let cmd = cmd.with_stdout(Out::Capture);
+        self.run(cmd.clone())
             .and_then(|output| RunError::catch(&cmd, || output.try_into_stdout_str()))
     }
 
     /// Runs a command returning its `stderr` output as a string.
-    fn read_bytes(&self, cmd: &Cmd) -> Result<Vec<u8>, RunError> {
-        let cmd = cmd.as_ref().clone().with_stdout(Out::Capture);
-        self.run(&cmd).map(|output| output.stdout.unwrap())
+    fn read_bytes(&self, cmd: Cmd) -> Result<Vec<u8>, RunError> {
+        let cmd = cmd.with_stdout(Out::Capture);
+        self.run(cmd).map(|output| output.stdout.unwrap())
     }
 }
 
 impl Run for LocalEnv {
-    fn run(&self, cmd: &Cmd) -> Result<RunOutput, RunError> {
-        RunError::catch(cmd, || {
+    fn run(&self, cmd: Cmd) -> Result<RunOutput, RunError> {
+        RunError::catch(&cmd, || {
             use io::Write;
+
+            let cmd = &cmd;
 
             let mut command = self.command(cmd);
             self.echo_cmd(cmd);
@@ -973,24 +975,21 @@ type BoxedFuture<'fut, T> = std::pin::Pin<Box<dyn 'fut + std::future::Future<Out
 #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
 #[cfg(feature = "async")]
 pub trait RunAsync {
-    fn run<'fut>(&'fut self, cmd: &'fut Cmd) -> BoxedFuture<'fut, RunResult<RunOutput>>;
+    fn run(&self, cmd: Cmd) -> BoxedFuture<RunResult<RunOutput>>;
 
-    fn read_str<'fut>(&'fut self, cmd: &'fut Cmd) -> BoxedFuture<'fut, RunResult<String>> {
+    fn read_str(&self, cmd: Cmd) -> BoxedFuture<RunResult<String>> {
         // Force capture the output.
-        let cmd = cmd.as_ref().clone().with_stdout(Out::Capture);
+        let cmd = cmd.with_stdout(Out::Capture);
         Box::pin(async move {
-            self.run(&cmd)
+            self.run(cmd.clone())
                 .await
                 .and_then(|output| RunError::catch(&cmd, || output.try_into_stdout_str()))
         })
     }
 
-    fn read_bytes<'fut>(
-        &'fut self,
-        cmd: &'fut Cmd,
-    ) -> BoxedFuture<'fut, Result<Vec<u8>, RunError>> {
-        let cmd = cmd.as_ref().clone().with_stdout(Out::Capture);
-        Box::pin(async move { self.run(&cmd).await.map(|output| output.stdout.unwrap()) })
+    fn read_bytes(&self, cmd: Cmd) -> BoxedFuture<Result<Vec<u8>, RunError>> {
+        let cmd = cmd.with_stdout(Out::Capture);
+        Box::pin(async move { self.run(cmd).await.map(|output| output.stdout.unwrap()) })
     }
 }
 

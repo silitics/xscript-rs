@@ -10,8 +10,9 @@ use tokio::{
 use crate::{Cmd, In, LocalEnv, RunAsync, RunError, RunErrorKind, RunOutput, RunResult, Vars};
 
 impl RunAsync for LocalEnv {
-    fn run<'fut>(&'fut self, cmd: &'fut Cmd) -> crate::BoxedFuture<RunResult<RunOutput>> {
+    fn run(&self, cmd: Cmd) -> crate::BoxedFuture<RunResult<RunOutput>> {
         Box::pin(async move {
+            let cmd = &cmd;
             let mut command = Command::new(&*self.resolve_prog(cmd.prog()));
             command.args(cmd.args());
             if let Some(cwd) = cmd.cwd() {

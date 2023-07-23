@@ -242,7 +242,7 @@ macro_rules! __private_extend_args {
         $crate::__private_extend_args!($cmd, $($($args)*)*);
     };
     ($cmd:ident, ...$arg:expr $(, $($args:tt)*)?) => {
-        $cmd.extend_args(&$arg);
+        $cmd.extend_args($arg);
         $crate::__private_extend_args!($cmd, $($($args)*)*);
     };
     ($cmd:ident, $value:literal $(, $($args:tt)*)?) => {

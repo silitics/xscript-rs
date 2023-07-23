@@ -10,4 +10,4 @@ repository.workspace = true
 [dependencies]
 anyhow = "1.0.71"
 clap = { version = "4.3.11", features = ["derive"] }
-xscript = { version = "0.1.0", path = "../crates/xscript" }
+xscript = { path = "../crates/xscript" }

@@ -42,7 +42,7 @@ fn task_doc(args: &DocArgs) -> anyhow::Result<()> {
         env(),
         [
             "cargo", "+nightly", "doc", "--quiet", "--message-format=short",
-            "--color=always", "--lib", "--all-features", ...args.extra_args
+            "--color=always", "--lib", "--all-features", ...&args.extra_args
         ].with_vars(vars! {
             RUSTDOCFLAGS = "--cfg docsrs --cfg xscript_unstable",
             RUSTFLAGS = "--cfg xscript_unstable",

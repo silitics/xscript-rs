@@ -2,14 +2,20 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::{
-    borrow::Cow,
+    borrow::{Borrow, Cow},
     collections::HashMap,
+    ffi::{OsStr, OsString},
+    fmt::Debug,
     fmt::{Display, Write},
+    hash::Hash,
     io,
+    ops::Deref,
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
 };
+
+use sealed::Sealed;
 
 #[cfg(all(not(xscript_unstable), feature = "docker"))]
 compile_error!("The `docker` feature requires `--cfg xscript_unstable`.");
@@ -24,18 +30,88 @@ pub mod docker;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
+/// Module for sealing traits.
+#[doc(hidden)]
+mod sealed {
+    use std::ffi::{OsStr, OsString};
+
+    pub trait Sealed {}
+
+    impl Sealed for str {}
+
+    impl Sealed for OsStr {}
+
+    impl Sealed for String {}
+
+    impl Sealed for OsString {}
+}
+
+/// Lossy string conversion.
+pub trait ToStringLossy: sealed::Sealed {
+    /// Convert to string, potentially skipping invalid characters.
+    fn to_string_lossy(&self) -> Cow<str>;
+}
+
+impl ToStringLossy for str {
+    fn to_string_lossy(&self) -> Cow<str> {
+        Cow::Borrowed(self)
+    }
+}
+
+impl ToStringLossy for OsStr {
+    fn to_string_lossy(&self) -> Cow<str> {
+        OsStr::to_string_lossy(&self)
+    }
+}
+
+/// A string type that can be used to construct commands.
+pub trait CmdString: 'static + Debug + Clone + Default + Eq + Hash + Sealed
+where
+    Self: AsRef<Self::Str>,
+    Self: AsRef<OsStr>,
+    Self: Deref<Target = Self::Str>,
+    Self: Borrow<Self::Str>,
+{
+    /// Unsized equivalent for references.
+    type Str: ?Sized
+        + ToOwned<Owned = Self>
+        + AsRef<OsStr>
+        + AsRef<Self::Str>
+        + Eq
+        + Hash
+        + ToStringLossy;
+
+    fn from_str(string: &str) -> &Self::Str;
+}
+
+impl CmdString for String {
+    type Str = str;
+
+    fn from_str(string: &str) -> &Self::Str {
+        string
+    }
+}
+
+impl CmdString for OsString {
+    type Str = OsStr;
+
+    fn from_str(string: &str) -> &Self::Str {
+        string.as_ref()
+    }
+}
+
 /// Shared inner data of a command.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct CmdData {
+struct CmdData<S: CmdString> {
     /// The program to run.
-    prog: String,
+    prog: S,
     /// The arguments to run the program with.
-    args: Vec<String>,
+    args: Vec<S>,
     /// The directory in which to run the command.
-    cwd: Option<String>,
+    cwd: Option<S>,
     /// The environment variables to run the command with.
-    vars: Option<Vars>,
+    vars: Option<Vars<S>>,
     /// The `stdin` input to provide to the command.
     stdin: Option<In>,
     /// Indicates what to do with the `stdout` output of the command.
@@ -48,8 +124,8 @@ struct CmdData {
     is_secret: bool,
 }
 
-impl CmdData {
-    fn new(prog: String) -> Self {
+impl<S: CmdString> CmdData<S> {
+    fn new(prog: S) -> Self {
         Self {
             prog,
             args: Vec::new(),
@@ -68,34 +144,31 @@ impl CmdData {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[must_use]
-pub struct Cmd(Arc<CmdData>);
+pub struct Cmd<S: CmdString = OsString>(Arc<CmdData<S>>);
 
-impl Cmd {
+impl<S: CmdString> Cmd<S> {
     /// Creates a new command for the given program.
-    pub fn new<S: AsRef<str>>(prog: S) -> Self {
-        fn _new(prog: &str) -> Cmd {
-            Cmd(Arc::new(CmdData::new(prog.to_owned())))
-        }
-        _new(prog.as_ref())
+    pub fn new<P: AsRef<S::Str>>(prog: P) -> Self {
+        Cmd(Arc::new(CmdData::new(prog.as_ref().to_owned())))
     }
 
     /// The program to run.
-    pub fn prog(&self) -> &str {
-        self.0.prog.as_str()
+    pub fn prog(&self) -> &S::Str {
+        self.0.prog.as_ref()
     }
 
     /// The arguments to run the program with.
-    pub fn args(&self) -> impl Iterator<Item = &str> {
-        self.0.args.iter().map(String::as_str)
+    pub fn args(&self) -> impl Iterator<Item = &S::Str> {
+        self.0.args.iter().map(AsRef::as_ref)
     }
 
     /// The directory in which to run the command, if any.
-    pub fn cwd(&self) -> Option<&str> {
+    pub fn cwd(&self) -> Option<&S::Str> {
         self.0.cwd.as_deref()
     }
 
     /// The environment variables to run the command with.
-    pub fn vars(&self) -> Option<&Vars> {
+    pub fn vars(&self) -> Option<&Vars<S>> {
         self.0.vars.as_ref()
     }
 
@@ -124,18 +197,21 @@ impl Cmd {
         self.0.is_secret
     }
 
-    fn data_mut(&mut self) -> &mut CmdData {
+    fn data_mut(&mut self) -> &mut CmdData<S> {
         Arc::make_mut(&mut self.0)
     }
 
     /// Adds an argument to the command.
-    pub fn add_arg<S: AsRef<str>>(&mut self, arg: S) -> &mut Self {
+    pub fn add_arg<A: AsRef<S::Str>>(&mut self, arg: A) -> &mut Self {
         self.data_mut().args.push(arg.as_ref().to_owned());
         self
     }
 
     /// Extends the arguments of the command.
-    pub fn extend_args<S: AsRef<str>, I: IntoIterator<Item = S>>(&mut self, args: I) -> &mut Self {
+    pub fn extend_args<A: AsRef<S::Str>, I: IntoIterator<Item = A>>(
+        &mut self,
+        args: I,
+    ) -> &mut Self {
         self.data_mut()
             .args
             .extend(args.into_iter().map(|arg| arg.as_ref().to_owned()));
@@ -143,19 +219,19 @@ impl Cmd {
     }
 
     /// Sets the directory in which to run the command.
-    pub fn with_cwd<P: Into<String>>(mut self, cwd: P) -> Self {
-        self.data_mut().cwd = Some(cwd.into());
+    pub fn with_cwd<P: AsRef<S::Str>>(mut self, cwd: P) -> Self {
+        self.data_mut().cwd = Some(cwd.as_ref().to_owned());
         self
     }
 
     /// Sets the environment variables to run the command with.
-    pub fn with_vars(mut self, vars: Vars) -> Self {
+    pub fn with_vars(mut self, vars: Vars<S>) -> Self {
         self.data_mut().vars = Some(vars);
         self
     }
 
     /// Sets an environment variable.
-    pub fn with_var<N: AsRef<str>, V: AsRef<str>>(mut self, name: N, value: V) -> Self {
+    pub fn with_var<N: AsRef<S::Str>, V: AsRef<S::Str>>(mut self, name: N, value: V) -> Self {
         self.data_mut()
             .vars
             .get_or_insert_with(Vars::new)
@@ -194,21 +270,21 @@ impl Cmd {
     }
 }
 
-impl AsRef<Cmd> for Cmd {
-    fn as_ref(&self) -> &Cmd {
+impl<S: CmdString> AsRef<Cmd<S>> for Cmd<S> {
+    fn as_ref(&self) -> &Cmd<S> {
         self
     }
 }
 
-impl std::fmt::Display for Cmd {
+impl<S: CmdString> std::fmt::Display for Cmd<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.0.is_secret {
             f.write_str("<secret command redacted>")?
         } else {
-            write_escaped(f, &self.0.prog)?;
+            write_escaped(f, &self.0.prog.to_string_lossy())?;
             for arg in &self.0.args {
                 f.write_char(' ')?;
-                write_escaped(f, arg)?;
+                write_escaped(f, &AsRef::<S::Str>::as_ref(arg).to_string_lossy())?;
             }
         }
         Ok(())
@@ -270,6 +346,24 @@ macro_rules! cmd {
         #[allow(unused_mut)]
         let mut cmd = $crate::Cmd::new($prog);
         $crate::__private_extend_args!(cmd, $($($args)*)*);
+        cmd
+    }};
+}
+
+/// Constructs a command using [`OsString`] as string type.
+#[macro_export]
+macro_rules! cmd_os {
+    ($($cmd:tt)*) => {{
+        let cmd: $crate::Cmd::<::std::ffi::OsString> = $crate::cmd!($($cmd)*);
+        cmd
+    }};
+}
+
+/// Constructs a command using [`String`] as string type.
+#[macro_export]
+macro_rules! cmd_str {
+    ($($cmd:tt)*) => {{
+        let cmd: $crate::Cmd::<::std::string::String> = $crate::cmd!($($cmd)*);
         cmd
     }};
 }
@@ -344,19 +438,19 @@ impl From<String> for In {
 
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct VarsData {
+struct VarsData<S: CmdString> {
     /// Indicates that all other environment variables shall be discarded.
     is_clean: bool,
     /// The values of the variables.
-    values: HashMap<String, Option<String>>,
+    values: HashMap<S, Option<S>>,
 }
 
 /// A set of environment variables.
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Vars(Arc<VarsData>);
+pub struct Vars<S: CmdString = OsString>(Arc<VarsData<S>>);
 
-impl Vars {
+impl<S: CmdString> Vars<S> {
     /// Constructs an empty set of environment variables.
     pub fn new() -> Self {
         Self(Default::default())
@@ -368,19 +462,19 @@ impl Vars {
     }
 
     /// The values of the environment variables.
-    pub fn values(&self) -> impl Iterator<Item = (&str, Option<&str>)> {
+    pub fn values(&self) -> impl Iterator<Item = (&S::Str, Option<&S::Str>)> {
         self.0
             .values
             .iter()
-            .map(|(k, v)| (k.as_str(), v.as_ref().map(String::as_str)))
+            .map(|(k, v)| (k.as_ref(), v.as_ref().map(AsRef::as_ref)))
     }
 
-    fn data_mut(&mut self) -> &mut VarsData {
+    fn data_mut(&mut self) -> &mut VarsData<S> {
         Arc::make_mut(&mut self.0)
     }
 
     /// Sets the value of an environment variable.
-    pub fn set<N: AsRef<str>, V: AsRef<str>>(&mut self, name: N, value: V) -> &mut Self {
+    pub fn set<N: AsRef<S::Str>, V: AsRef<S::Str>>(&mut self, name: N, value: V) -> &mut Self {
         self.data_mut()
             .values
             .insert(name.as_ref().to_owned(), Some(value.as_ref().to_owned()));
@@ -388,17 +482,20 @@ impl Vars {
     }
 
     /// Discards the value of an environment variable.
-    pub fn unset<N: Into<String>>(&mut self, name: N) -> &mut Self {
-        self.data_mut().values.insert(name.into(), None);
+    pub fn unset<N: AsRef<S::Str>>(&mut self, name: N) -> &mut Self {
+        self.data_mut()
+            .values
+            .insert(name.as_ref().to_owned(), None);
         self
     }
 
     /// Inherits the environment variable from the parent process.
-    pub fn inherit<N: AsRef<str>>(&mut self, name: N) -> Result<&mut Self, std::env::VarError> {
+    pub fn inherit<N: AsRef<S::Str>>(&mut self, name: N) -> Result<&mut Self, std::env::VarError> {
         let name = name.as_ref();
-        match std::env::var(name) {
+        let os_name = AsRef::<OsStr>::as_ref(name);
+        match std::env::var(os_name) {
             Ok(value) => {
-                self.set(name, value);
+                self.set(name, S::from_str(value.as_str()));
             }
             Err(std::env::VarError::NotPresent) => {
                 self.unset(name);
@@ -411,8 +508,8 @@ impl Vars {
     }
 
     /// Resets a variable.
-    pub fn reset<N: Into<String>>(&mut self, name: N) -> &mut Self {
-        self.data_mut().values.remove(&name.into());
+    pub fn reset<N: AsRef<S::Str>>(&mut self, name: N) -> &mut Self {
+        self.data_mut().values.remove(name.as_ref());
         self
     }
 }
@@ -443,7 +540,7 @@ macro_rules! __private_populate_vars {
 /// Convenience macro for constructing sets of variables.
 ///
 /// ```rust
-/// # use xscript::vars;
+/// # use xscript::{vars_os as vars};
 /// vars! {
 ///     RUSTDOCFLAGS = "--cfg docsrs --cfg xscript_unstable",
 ///     RUSTFLAGS = "--cfg xscript_unstable",
@@ -456,6 +553,24 @@ macro_rules! vars {
         let mut env_vars = $crate::Vars::new();
         $crate::__private_populate_vars!(env_vars, $($vars)*);
         env_vars
+    }};
+}
+
+/// Constructs environment variables using [`OsString`] as string type.
+#[macro_export]
+macro_rules! vars_os {
+    ($($vars:tt)*) => {{
+        let vars: $crate::Vars<::std::ffi::OsString> = $crate::vars!($($vars)*);
+        vars
+    }};
+}
+
+/// Constructs environment variables using [`String`] as string type.
+#[macro_export]
+macro_rules! vars_str {
+    ($($vars:tt)*) => {{
+        let vars: $crate::Vars<::std::string::String> = $crate::vars!($($vars)*);
+        vars
     }};
 }
 
@@ -514,21 +629,21 @@ impl RunOutput {
 
 /// Error running a command.
 #[derive(Debug)]
-pub struct RunError {
+pub struct RunError<S: CmdString> {
     /// The command that failed.
-    cmd: Cmd,
+    cmd: Cmd<S>,
     /// The kind of error.
     kind: RunErrorKind,
 }
 
-impl RunError {
+impl<S: CmdString> RunError<S> {
     /// Creates a new [`RunError`].
-    pub fn new(cmd: Cmd, kind: RunErrorKind) -> Self {
+    pub fn new(cmd: Cmd<S>, kind: RunErrorKind) -> Self {
         Self { cmd, kind }
     }
 
     /// Transforms a [`RunErrorKind`] of a closure to [`RunError`].
-    pub fn catch<F, U>(cmd: &Cmd, func: F) -> RunResult<U>
+    pub fn catch<F, U>(cmd: &Cmd<S>, func: F) -> RunResult<U, S>
     where
         F: FnOnce() -> Result<U, RunErrorKind>,
     {
@@ -538,7 +653,7 @@ impl RunError {
     /// Transforms a [`RunErrorKind`] of a closure to [`RunError`].
     #[cfg(feature = "async")]
     #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
-    pub async fn catch_async<F, U, Fut>(cmd: &Cmd, func: F) -> RunResult<U>
+    pub async fn catch_async<F, U, Fut>(cmd: &Cmd<S>, func: F) -> RunResult<U, S>
     where
         Fut: std::future::Future<Output = Result<U, RunErrorKind>>,
         F: FnOnce() -> Fut,
@@ -549,7 +664,7 @@ impl RunError {
     }
 }
 
-impl std::error::Error for RunError {
+impl<S: CmdString> std::error::Error for RunError<S> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.kind {
             RunErrorKind::Failed { .. } => None,
@@ -560,7 +675,7 @@ impl std::error::Error for RunError {
     }
 }
 
-impl Display for RunError {
+impl<S: CmdString> Display for RunError<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("error running command `{}`: ", self.cmd))?;
         match &self.kind {
@@ -568,7 +683,7 @@ impl Display for RunError {
                 f.write_str("command failed with non-zero exit code")?;
                 if let Some(code) = output.code {
                     f.write_char(' ')?;
-                    code.fmt(f)?;
+                    Display::fmt(&code, f)?;
                 }
                 if let Some(stderr) = &output.stderr {
                     f.write_str("\n=== STDERR ===\n")?;
@@ -580,13 +695,13 @@ impl Display for RunError {
                 }
             }
             RunErrorKind::Other(error) => {
-                error.fmt(f)?;
+                Display::fmt(&error, f)?;
             }
             RunErrorKind::Io(error) => {
-                error.fmt(f)?;
+                Display::fmt(&error, f)?;
             }
             RunErrorKind::Custom(message) => {
-                message.fmt(f)?;
+                Display::fmt(&message, f)?;
             }
         }
         Ok(())
@@ -594,7 +709,7 @@ impl Display for RunError {
 }
 
 /// The result of running a command.
-pub type RunResult<T> = Result<T, RunError>;
+pub type RunResult<T, S> = Result<T, RunError<S>>;
 
 /// Error while running a command.
 #[derive(Debug)]
@@ -681,7 +796,7 @@ struct EnvInner {
     /// The working directory of the environment.
     cwd: PathBuf,
     /// The environment variables of the environment, if any.
-    vars: Vars,
+    vars: Vars<OsString>,
     /// The default input provided to commands, if any.
     default_stdin: In,
     /// Indicates what to do with the `stdout` output by default.
@@ -714,8 +829,8 @@ impl EnvInner {
 /// Execution environment of the parent process.
 pub struct ParentEnv;
 
-impl Run for ParentEnv {
-    fn run(&self, cmd: Cmd) -> Result<RunOutput, RunError> {
+impl Run<OsString> for ParentEnv {
+    fn run(&self, cmd: Cmd<OsString>) -> Result<RunOutput, RunError<OsString>> {
         // TODO: This is inefficient, we should factor out the actual launch code.
         let env = RunError::catch(&cmd, || LocalEnv::current_dir().map_err(RunErrorKind::from))?;
         Run::run(&env, cmd)
@@ -776,13 +891,13 @@ impl LocalEnv {
     }
 
     /// Sets an environment variable.
-    pub fn set_var<N: AsRef<str>, V: AsRef<str>>(&mut self, name: N, value: V) -> &mut Self {
+    pub fn set_var<N: AsRef<OsStr>, V: AsRef<OsStr>>(&mut self, name: N, value: V) -> &mut Self {
         self.inner_mut().vars.set(name, value);
         self
     }
 
     /// Sets an environment variable.
-    pub fn with_var<N: AsRef<str>, V: AsRef<str>>(mut self, name: N, value: V) -> Self {
+    pub fn with_var<N: AsRef<OsStr>, V: AsRef<OsStr>>(mut self, name: N, value: V) -> Self {
         self.set_var(name, value);
         self
     }
@@ -842,21 +957,21 @@ impl LocalEnv {
         self.0.cwd.join(path.as_ref())
     }
 
-    fn resolve_prog<'p>(&self, prog: &'p str) -> Cow<'p, Path> {
-        if prog.contains(std::path::is_separator) {
+    fn resolve_prog<'p>(&self, prog: &'p OsStr) -> Cow<'p, Path> {
+        if prog.to_string_lossy().contains(std::path::is_separator) {
             Cow::Owned(self.resolve_path(prog))
         } else {
             Cow::Borrowed(Path::new(prog))
         }
     }
 
-    fn echo_cmd(&self, cmd: &Cmd) {
+    fn echo_cmd(&self, cmd: &Cmd<OsString>) {
         if self.0.echo_commands {
             eprintln!("+ {cmd}");
         }
     }
 
-    fn command(&self, cmd: &Cmd) -> Command {
+    fn command(&self, cmd: &Cmd<OsString>) -> Command {
         let mut command = Command::new(&*self.resolve_prog(cmd.prog()));
         command.args(cmd.args());
         if let Some(cwd) = cmd.cwd() {
@@ -899,26 +1014,26 @@ fn update_vars(command: &mut Command, vars: &Vars) {
 }
 
 /// Trait for running commands in an execution environment.
-pub trait Run {
+pub trait Run<S: CmdString> {
     /// Runs a command returning its output.
-    fn run(&self, cmd: Cmd) -> Result<RunOutput, RunError>;
+    fn run(&self, cmd: Cmd<S>) -> Result<RunOutput, RunError<S>>;
 
     /// Runs a command returning its `stdout` output as a string.
-    fn read_str(&self, cmd: Cmd) -> Result<String, RunError> {
+    fn read_str(&self, cmd: Cmd<S>) -> Result<String, RunError<S>> {
         let cmd = cmd.with_stdout(Out::Capture);
         self.run(cmd.clone())
             .and_then(|output| RunError::catch(&cmd, || output.try_into_stdout_str()))
     }
 
     /// Runs a command returning its `stderr` output as a string.
-    fn read_bytes(&self, cmd: Cmd) -> Result<Vec<u8>, RunError> {
+    fn read_bytes(&self, cmd: Cmd<S>) -> Result<Vec<u8>, RunError<S>> {
         let cmd = cmd.with_stdout(Out::Capture);
         self.run(cmd).map(|output| output.stdout.unwrap())
     }
 }
 
-impl Run for LocalEnv {
-    fn run(&self, cmd: Cmd) -> Result<RunOutput, RunError> {
+impl Run<OsString> for LocalEnv {
+    fn run(&self, cmd: Cmd<OsString>) -> Result<RunOutput, RunError<OsString>> {
         RunError::catch(&cmd, || {
             use io::Write;
 
@@ -974,10 +1089,10 @@ type BoxedFuture<'fut, T> = std::pin::Pin<Box<dyn 'fut + std::future::Future<Out
 /// Trait for running commands asynchronously in an execution environment.
 #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
 #[cfg(feature = "async")]
-pub trait RunAsync {
-    fn run(&self, cmd: Cmd) -> BoxedFuture<RunResult<RunOutput>>;
+pub trait RunAsync<S: CmdString> {
+    fn run(&self, cmd: Cmd<S>) -> BoxedFuture<RunResult<RunOutput, S>>;
 
-    fn read_str(&self, cmd: Cmd) -> BoxedFuture<RunResult<String>> {
+    fn read_str(&self, cmd: Cmd<S>) -> BoxedFuture<RunResult<String, S>> {
         // Force capture the output.
         let cmd = cmd.with_stdout(Out::Capture);
         Box::pin(async move {
@@ -987,7 +1102,7 @@ pub trait RunAsync {
         })
     }
 
-    fn read_bytes(&self, cmd: Cmd) -> BoxedFuture<Result<Vec<u8>, RunError>> {
+    fn read_bytes(&self, cmd: Cmd<S>) -> BoxedFuture<Result<Vec<u8>, RunError<S>>> {
         let cmd = cmd.with_stdout(Out::Capture);
         Box::pin(async move { self.run(cmd).await.map(|output| output.stdout.unwrap()) })
     }

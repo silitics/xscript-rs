@@ -71,7 +71,7 @@ impl ContainerEnv {
         }
     }
 
-    pub async fn run(&self, cmd: &Cmd) -> RunResult<RunOutput> {
+    pub async fn run(&self, cmd: &Cmd<String>) -> RunResult<RunOutput, String> {
         RunError::catch_async(cmd, || {
             async {
                 let create_opts = ExecCreateOpts::builder()

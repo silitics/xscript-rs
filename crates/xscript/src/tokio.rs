@@ -2,6 +2,8 @@
 //!
 //! This module adds an implementation of [`RunAsync`] to [`LocalEnv`].
 
+use std::ffi::OsString;
+
 use tokio::{
     io::{self, AsyncWriteExt},
     process::Command,
@@ -9,8 +11,8 @@ use tokio::{
 
 use crate::{Cmd, In, LocalEnv, RunAsync, RunError, RunErrorKind, RunOutput, RunResult, Vars};
 
-impl RunAsync for LocalEnv {
-    fn run(&self, cmd: Cmd) -> crate::BoxedFuture<RunResult<RunOutput>> {
+impl RunAsync<OsString> for LocalEnv {
+    fn run(&self, cmd: Cmd) -> crate::BoxedFuture<RunResult<RunOutput, OsString>> {
         Box::pin(async move {
             let cmd = &cmd;
             let mut command = Command::new(&*self.resolve_prog(cmd.prog()));

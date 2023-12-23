@@ -12,3 +12,9 @@ pub fn test_parent_env_macros() {
         b"Hello World!"
     );
 }
+
+#[test]
+pub fn test_native_paths() {
+    let path = std::env::current_dir().unwrap();
+    run!(["ls", "-l", path]).unwrap();
+}

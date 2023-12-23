@@ -57,14 +57,14 @@ The remaining arguments become the arguments of the command.
 Here is a simple example:
 
 ```rust
-# use xscript::cmd;
+# use xscript::{cmd_os as cmd};
 cmd!("git", "rev-parse", "--show-toplevel");
 ```
 
 When using string literals, the program and arguments both support string interpolation with [`format!`]:
 
 ```rust
-# use xscript::cmd;
+# use xscript::{cmd_os as cmd};
 let prefix = "/usr/bin";
 let user = "silitics";
 let repo = "xscript-rs";
@@ -75,7 +75,7 @@ Instead of string literals, any expression implementing [`AsRef<str>`] can be us
 Further, to extend the arguments of a command with an iterable, any iterable expression can be prefixed with `...`:
 
 ```rust
-# use xscript::cmd;
+# use xscript::{cmd_os as cmd};
 const CARGO: &str = "cargo";
 let cargo_command = "doc";
 let cargo_args = ["+nightly"];
@@ -87,19 +87,12 @@ After constructing a command with [`cmd!`], builder methods can be called to fur
 For instance, environment variables can be set per command and the `stdin` input can be specified:
 
 ```rust
-# use xscript::{cmd};
+# use xscript::{cmd_os as cmd};
 cmd!("cargo", "+nightly", "doc").with_var("RUSTDOCFLAGS", "--cfg docsrs");
 cmd!("gzip", "--best").with_stdin("Compress this string!");
 ```
 
 Note that [`cmd!`] merely constructs the command but does not yet execute it.
-
-**Remarks**:
-In contrast to the standard library's [`Command`][std::process::Command], the program and arguments must be proper UTF-8 strings.
-Non UTF-8 strings are a pain to work with and non-portable.
-We want [`Cmd`] to be portable in the sense that it is easy to serialize and convert to a proper UTF-8 string without losing any information (e.g., for logging and debugging).
-An unfortunate consequence of this design is that [`Path`][std::path::Path] cannot directly be used as an argument.
-The recommended way to deal with paths is to use [`camino`](https://docs.rs/camino/latest/camino/).
 
 ### Environments
 
@@ -182,3 +175,8 @@ We may also add such functionality to `xscript` later.
 
 Note that `xscript` does not support building pipelines where the output of one command is continuously fed as an input to another command running at the same time.
 In case you need pipelines, consider using [`duct`](https://docs.rs/duct/latest/duct/) instead.
+
+In contrast to all other crates mentioned above, `xscript` is generic over the command's string type.
+It supports both [`OsString`]- and [`String`]-based commands for local and portable commands, respectively.
+Most macros rely on Rust's type inference for the correct string type.
+For the [`cmd!`] macro, there also exist specialized variants.

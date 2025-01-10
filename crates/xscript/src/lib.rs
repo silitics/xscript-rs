@@ -1,31 +1,19 @@
 #![doc = include_str!("../docs/lib.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use std::{
-    borrow::{Borrow, Cow},
-    collections::HashMap,
-    ffi::{OsStr, OsString},
-    fmt::Debug,
-    fmt::{Display, Write},
-    hash::Hash,
-    io,
-    ops::Deref,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::borrow::{Borrow, Cow};
+use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
+use std::fmt::{Debug, Display, Write};
+use std::hash::Hash;
+use std::io;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Arc;
 
 use sealed::Sealed;
 
-#[cfg(all(not(xscript_unstable), feature = "docker"))]
-compile_error!("The `docker` feature requires `--cfg xscript_unstable`.");
-
-#[cfg(all(not(xscript_unstable), any(features = "async", feature = "tokio")))]
-compile_error!("The `async` and `tokio` features require `--cfg xscript_unstable`.");
-
-#[cfg(feature = "docker")]
-#[cfg_attr(docsrs, doc(cfg(feature = "docker")))]
-pub mod docker;
 #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
 #[cfg(feature = "tokio")]
 pub mod tokio;
@@ -653,12 +641,11 @@ impl<S: CmdString> RunError<S> {
     /// Transforms a [`RunErrorKind`] of a closure to [`RunError`].
     #[cfg(feature = "async")]
     #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
-    pub async fn catch_async<F, U, Fut>(cmd: &Cmd<S>, func: F) -> RunResult<U, S>
+    pub async fn catch_async<F, U>(cmd: &Cmd<S>, future: F) -> RunResult<U, S>
     where
-        Fut: std::future::Future<Output = Result<U, RunErrorKind>>,
-        F: FnOnce() -> Fut,
+        F: std::future::Future<Output = Result<U, RunErrorKind>>,
     {
-        func()
+        future
             .await
             .map_err(|kind| RunError::new(cmd.clone(), kind))
     }
@@ -820,7 +807,7 @@ impl EnvInner {
             default_stdout: Out::Capture,
             default_stderr: Out::Capture,
             replay_stdout: false,
-            replay_stderr: true,
+            replay_stderr: false,
             echo_commands: false,
         }
     }
@@ -1083,28 +1070,34 @@ impl Run<OsString> for LocalEnv {
     }
 }
 
-#[cfg(feature = "async")]
-type BoxedFuture<'fut, T> = std::pin::Pin<Box<dyn 'fut + std::future::Future<Output = T>>>;
-
 /// Trait for running commands asynchronously in an execution environment.
 #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
 #[cfg(feature = "async")]
-pub trait RunAsync<S: CmdString> {
-    fn run(&self, cmd: Cmd<S>) -> BoxedFuture<RunResult<RunOutput, S>>;
+pub trait RunAsync<S: CmdString + Send + Sync>: Sync {
+    fn run(&self, cmd: Cmd<S>)
+        -> impl Send + std::future::Future<Output = RunResult<RunOutput, S>>;
 
-    fn read_str(&self, cmd: Cmd<S>) -> BoxedFuture<RunResult<String, S>> {
-        // Force capture the output.
-        let cmd = cmd.with_stdout(Out::Capture);
-        Box::pin(async move {
+    fn read_str(
+        &self,
+        cmd: Cmd<S>,
+    ) -> impl Send + std::future::Future<Output = RunResult<String, S>> {
+        async move {
+            // Force capture the output.
+            let cmd = cmd.with_stdout(Out::Capture);
             self.run(cmd.clone())
                 .await
                 .and_then(|output| RunError::catch(&cmd, || output.try_into_stdout_str()))
-        })
+        }
     }
 
-    fn read_bytes(&self, cmd: Cmd<S>) -> BoxedFuture<Result<Vec<u8>, RunError<S>>> {
-        let cmd = cmd.with_stdout(Out::Capture);
-        Box::pin(async move { self.run(cmd).await.map(|output| output.stdout.unwrap()) })
+    fn read_bytes(
+        &self,
+        cmd: Cmd<S>,
+    ) -> impl Send + std::future::Future<Output = RunResult<Vec<u8>, S>> {
+        async move {
+            let cmd = cmd.with_stdout(Out::Capture);
+            self.run(cmd).await.map(|output| output.stdout.unwrap())
+        }
     }
 }
 

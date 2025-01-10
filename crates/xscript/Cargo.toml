@@ -1,24 +1,20 @@
 [package]
 name = "xscript"
-description = "A library for writing robust shell-script-like programs and running commands anywhere with ease."
-version = "0.3.0"
+description = "A library for writing robust shell-script-like programs and running commands with ease."
+version = "0.4.0"
 edition = "2021"
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-docker-api = { version = "0.14.0", optional = true }  # PRIVATE
-futures = { version = "0.3.28", optional = true }  # PRIVATE
-serde = { version = "1.0.167", optional = true, features = ["rc", "derive"] }
-thiserror = { version = "1.0.43", optional = true }  # PRIVATE
+serde = { version = "1", optional = true, features = ["rc", "derive"] }
 tokio = { version = "1.29.1", optional = true, features = ["process", "macros", "io-std", "io-util"] }
 
 [features]
 async = []
-docker = ["tokio", "dep:docker-api", "dep:thiserror"]
 serde = ["dep:serde"]
-tokio = ["dep:tokio", "dep:futures", "async"]
+tokio = ["dep:tokio", "async"]
 
 [package.metadata.docs.rs]
 all-features = true

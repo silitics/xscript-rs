@@ -1,4 +1,6 @@
-use std::{env, path::PathBuf, sync::OnceLock};
+use std::env;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use clap::Parser;
 use xscript::{read_str, run, vars, LocalEnv, Out, Run};
@@ -44,8 +46,7 @@ fn task_doc(args: &DocArgs) -> anyhow::Result<()> {
             "cargo", "+nightly", "doc", "--quiet", "--message-format=short",
             "--color=always", "--lib", "--all-features", ...&args.extra_args
         ].with_vars(vars! {
-            RUSTDOCFLAGS = "--cfg docsrs --cfg xscript_unstable",
-            RUSTFLAGS = "--cfg xscript_unstable",
+            RUSTDOCFLAGS = "--cfg docsrs",
         })
     )?;
     Ok(())

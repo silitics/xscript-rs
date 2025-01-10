@@ -9,4 +9,4 @@ repository.workspace = true
 
 [dependencies]
 tokio = { version = "1.29.1", features = ["full"] }
-xscript = { path = "../xscript", features = ["docker", "tokio"] }
+xscript = { path = "../xscript", features = ["tokio"] }

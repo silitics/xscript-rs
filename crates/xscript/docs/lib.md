@@ -1,6 +1,6 @@
 # XScript
 
-A library for writing robust shell-script-like programs and running commands anywhere with ease.
+A library for writing robust shell-script-like programs and running commands with ease.
 
 The initial motivation for this crate was [`xtask`](https://github.com/matklad/cargo-xtask) development.
 Taken from the [`xtask` of this crate](https://github.com/silitics/xscript-rs/blob/main/xtask/), here is an [example for building the documentation you are currently reading](https://github.com/silitics/xscript-rs/blob/main/crates/xscript-examples/examples/build-docs.rs) with the nightly toolchain and proper `--cfg` flags:
@@ -143,15 +143,8 @@ This allows running commands in the environment of the parent process, e.g., in 
 This crate offers the following optional features:
 
 - `serde`: Support for serialization and deserialization of various data structures via [Serde][serde].
-
-🚧 In addition, there are also the following _unstable_ work-in-progress features:
-
 - `async`: Support for asynchronous environments (in particular, the [`RunAsync`] trait).
-- `docker`: Support for running commands asynchronously in a Docker container.
 - `tokio`: Support for running commands asynchronously using [Tokio][tokio].
-
-⚠️ **Warning**: Unstable means that they may not even be in a working state.
-They require `--cfg xscript_unstable`.
 
 ## Related Crates
 

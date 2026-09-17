@@ -649,6 +649,20 @@ impl<S: CmdString> RunError<S> {
             .await
             .map_err(|kind| RunError::new(cmd.clone(), kind))
     }
+
+    /// Returns the underlaying [`RunErrorType`]
+    pub fn kind(&self) -> &RunErrorKind {
+        &self.kind
+    }
+
+    /// Returns command output, if any.
+    pub fn output(&self) -> Option<&RunOutput> {
+        if let RunErrorKind::Failed(output) = &self.kind {
+            Some(output)
+        } else {
+            None
+        }
+    }
 }
 
 impl<S: CmdString> std::error::Error for RunError<S> {
@@ -916,9 +930,33 @@ impl LocalEnv {
         &self.0.default_stderr
     }
 
-    // Sets what to do with the `stderr` output of commands by default.
+    /// Sets what to do with the `stderr` output of commands by default.
     pub fn with_default_stderr(mut self, stderr: Out) -> Self {
         self.inner_mut().default_stderr = stderr;
+        self
+    }
+
+    /// Replays command stdout when it finishes.
+    pub fn with_replay_stdout(mut self) -> Self {
+        self.inner_mut().replay_stdout = true;
+        self
+    }
+
+    /// Disables replay of command stdout when it finishes.
+    pub fn without_replay_stdout(mut self) -> Self {
+        self.inner_mut().replay_stdout = true;
+        self
+    }
+
+    /// Replays command stderr when it finishes.
+    pub fn with_replay_stderr(mut self) -> Self {
+        self.inner_mut().replay_stderr = true;
+        self
+    }
+
+    /// Disables replay of command stderr when it finishes.
+    pub fn without_replay_stderr(mut self) -> Self {
+        self.inner_mut().replay_stderr = true;
         self
     }
 
